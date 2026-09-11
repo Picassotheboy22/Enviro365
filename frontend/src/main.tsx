@@ -15,8 +15,11 @@ const queryClient = new QueryClient({
       // Retrying can't fix a client error (401, 403, 404...), so only retry network or server problems, at most twice.
       retry: (failureCount, error) =>
         !(error instanceof ApiError && error.status >= 400 && error.status < 500) && failureCount < 2,
-      refetchOnWindowFocus: false,
-      staleTime: 30_000,
+      // Other people change these figures too (staff pay a notice, an investor submits one), so cached data counts as
+      // out of date straight away: a page fetches fresh figures when it opens and when the user comes back to the tab,
+      // while still showing the previous figures instantly. useLiveRefresh also refreshes them while the app is in use.
+      staleTime: 0,
+      refetchOnWindowFocus: true,
     },
   },
 })

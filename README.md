@@ -507,6 +507,7 @@ notification.
 | JPA Specification and `@EntityGraph` | Any combination of optional filters works, without extra queries per row (the N+1 problem). |
 | shadcn/ui and Tailwind | Accessible Radix components are copied into the repo, so every line can be read and changed. The `login-03` and `sidebar-07` templates were adapted for the sign-in page and the app layout. |
 | TanStack Query for server data | Caching, loading and error states, and automatic reloading after a notice changes, without hand-written `useEffect` fetching. |
+| Figures kept current across users (`useLiveRefresh`) | Other people change the figures too: staff pay a notice, an investor submits one. Every page fetches fresh data when it opens and when the user comes back to the tab, and refreshes every 30 seconds while the user is active. It stops after five minutes without input, so an unattended screen does not keep the session alive past the 30-minute idle sign-out. |
 | Staff pages with their own URLs (`/clients/3`, `/history?investor=3&status=open`) | Every client and filter has a page that can be bookmarked or linked to, for example from the dashboard, and a refresh keeps the selection. The server still enforces access. |
 | Aggregate queries for the client list and dashboard (`GROUP BY` with interface projections) | Totals for all clients come from two queries rather than one per client, and the counts and amounts for every status come from one query, so the pages stay fast as the data grows. |
 | Dashboard statistics calculated on the server (`GET /api/dashboard`) | The browser receives a handful of numbers instead of every notice. Months without payments are filled in with zeros, so the chart has no gaps. The count of clients eligible for retirement withdrawals uses the cut-off date from `WithdrawalPolicy`, so the age rule stays in one place. |
@@ -540,11 +541,12 @@ notification.
 | `WithdrawalApiIntegrationTest` (19) | Full stack (`@SpringBootTest` with H2) | Runs as the real seeded users: roles, ownership of portfolios and notices, the staff dashboard and client totals, the age 65 rejection, the 90% rejection, money on hold refused for new notices, a notice that appears in the history and the CSV, the whole workflow from pending to paid with the balance checked at each step, cancelling, and rejecting with a reason the investor can see |
 | `AuthIntegrationTest` (9) | Full stack | Real sign-in and session, the generic failure message, usernames in any letter case, CSRF required, the lock after 5 failures (429), sign-out, security headers |
 
-### Frontend (46 tests, `npm test`)
+### Frontend (47 tests, `npm test`)
 
 - Notice workflow helpers: which buttons each role gets for each status, open statuses, paid totals added up in cents, oldest-first ordering and the rejection reason check.
 - Client-side validation: the 90% boundary, money on hold, badly formatted amounts, the message for a restricted product, converting to cents without floating-point errors, and the date range check.
 - The query string builder, including repeated status parameters.
+- When the screens refresh themselves: a user counts as active until five minutes pass without any input.
 - Dashboard helpers: month labels, short amounts, percentages and the ranking of top clients, with money handled in cents.
 - The page to return to after sign-in, which only accepts paths inside the app so it cannot be used as an open redirect.
 
@@ -576,7 +578,7 @@ notification.
 - [x] Global exception handling
 - [x] DTO layer
 - [x] Input validation
-- [x] Unit tests (111 backend and 46 frontend)
+- [x] Unit tests (111 backend and 47 frontend)
 - [x] UI validation
 
 ### Beyond the brief
@@ -616,8 +618,10 @@ the two roles (investors, and staff who review and pay notices), the staff dashb
 withdrawal notices (pending, approved, paid) instead of processing them immediately, shadcn/ui with Tailwind for the
 interface, and linting and formatting as the development standards to enforce.
 
-How the work was checked. All 111 backend tests and 46 frontend tests pass, and ESLint, Prettier and Spotless report no
-problems. The API, the security rules (sign-in, CSRF, ownership and sign-out) and the notice workflow were also tested
+How the work was checked. All 111 backend tests and 47 frontend tests pass, and ESLint, Prettier and Spotless report no
+problems. A script took notices through every workflow step and checked that each amount on the investor overview,
+the staff dashboard and the client list changed by exactly the expected amount, and a browser test checked that the
+screens show those changes without reloading, including changes made by another user. The API, the security rules (sign-in, CSRF, ownership and sign-out) and the notice workflow were also tested
 by hand with curl, and the interface was tested in a browser with both investor and staff accounts.
 
 My understanding of the code. I reviewed the generated code, and I can explain how every part works and why it was

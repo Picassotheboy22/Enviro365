@@ -3,6 +3,7 @@ import { useCurrentUser } from '@/auth/auth-context'
 import { AppSidebar } from '@/components/app-sidebar'
 import { SiteHeader } from '@/components/site-header'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { useLiveRefresh } from '@/hooks/use-live-refresh'
 
 function pageTitle(pathname: string, isStaff: boolean): string {
   if (pathname.startsWith('/clients/')) return 'Client portfolio'
@@ -17,6 +18,8 @@ function pageTitle(pathname: string, isStaff: boolean): string {
 export function AppLayout() {
   const { pathname } = useLocation()
   const user = useCurrentUser()
+  // Only signed-in pages refresh themselves; see useLiveRefresh for when and why.
+  useLiveRefresh()
 
   return (
     <SidebarProvider>
