@@ -1,0 +1,14 @@
+# Check out text files with LF line endings on every machine, which is what Prettier and Spotless expect.
+# Without this, Git on Windows (core.autocrlf=true) converts them to CRLF and "npm run format:check" fails.
+* text=auto eol=lf
+
+# Windows scripts need CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary files are never converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.jar binary
+*.woff2 binary
