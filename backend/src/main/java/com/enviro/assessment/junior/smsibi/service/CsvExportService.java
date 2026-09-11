@@ -4,9 +4,11 @@ import com.enviro.assessment.junior.smsibi.dto.WithdrawalResponse;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.apache.commons.csv.CSVFormat;
@@ -19,12 +21,24 @@ import org.springframework.stereotype.Service;
  * <p>It receives already-filtered rows rather than querying the database itself, so it has a single
  * responsibility (formatting) and can be unit-tested without a database. Apache Commons CSV takes care of
  * quoting values that contain commas, quotes or line breaks, which hand-built string joining gets wrong.
+ *
+ * <p>Every notice is listed with its status, so the file matches the table on screen. The payment columns (paid date,
+ * balance before and after) are only filled in for paid notices.
  */
 @Service
 public class CsvExportService {
 
     static final String[] HEADERS = {
-        "Notice ID", "Date", "Investor", "Product", "Product Type", "Amount", "Balance Before", "Balance After"
+        "Notice ID",
+        "Submitted",
+        "Investor",
+        "Product",
+        "Product Type",
+        "Amount",
+        "Status",
+        "Paid",
+        "Balance Before",
+        "Balance After"
     };
 
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -43,14 +57,15 @@ public class CsvExportService {
             for (WithdrawalResponse row : rows) {
                 printer.printRecord(
                         row.id(),
-                        row.createdAt().format(DATE_TIME),
+                        dateTime(row.createdAt()),
                         safeText(row.investorName()),
                         safeText(row.productName()),
                         row.productType(),
-                        // toPlainString avoids scientific notation (e.g. 1E+3) that spreadsheets might misread.
-                        row.amount().toPlainString(),
-                        row.balanceBefore().toPlainString(),
-                        row.balanceAfter().toPlainString());
+                        amount(row.amount()),
+                        row.status(),
+                        dateTime(row.paidAt()),
+                        amount(row.balanceBefore()),
+                        amount(row.balanceAfter()));
             }
         } catch (IOException e) {
             // A StringWriter never actually throws, but CSVPrinter's API declares IOException.
@@ -70,6 +85,15 @@ public class CsvExportService {
             return "'" + value;
         }
         return value;
+    }
+
+    // toPlainString avoids scientific notation (e.g. 1E+3) that spreadsheets might misread. Empty until paid.
+    private static String amount(BigDecimal value) {
+        return value == null ? "" : value.toPlainString();
+    }
+
+    private static String dateTime(LocalDateTime value) {
+        return value == null ? "" : value.format(DATE_TIME);
     }
 
     /** The generated file: a suggested download name plus UTF-8 bytes. */

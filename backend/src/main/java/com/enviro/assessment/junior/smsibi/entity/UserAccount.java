@@ -69,7 +69,7 @@ public class UserAccount {
         return new UserAccount(investor.getEmail(), passwordHash, investor.getFullName(), Role.INVESTOR, investor);
     }
 
-    /** A staff account with read-only access to every investor. */
+    /** A staff account: sees every investor, and reviews and pays withdrawal notices. */
     public static UserAccount staff(String username, String displayName, String passwordHash) {
         return new UserAccount(username, passwordHash, displayName, Role.ADMIN, null);
     }

@@ -21,8 +21,8 @@ export function toCents(amount: number): number {
  * Client-side checks for instant feedback while the user types.
  *
  * The backend re-checks everything when the form is submitted, so this is a convenience for the user,
- * not a security boundary. The limits (maxWithdrawalAmount, withdrawalAllowed) come from the server's
- * portfolio response, so the age and 90% calculations are not duplicated here.
+ * not a security boundary. The limits (availableBalance, maxWithdrawalAmount, withdrawalAllowed) come from the
+ * server's portfolio response, so the age, on-hold and 90% calculations are not duplicated here.
  */
 export function validateWithdrawal(
   product: ProductResponse | undefined,
@@ -50,13 +50,20 @@ export function validateWithdrawal(
   if (cents <= 0) {
     errors.amount = 'Amount must be greater than zero.'
   } else if (product?.withdrawalAllowed) {
-    if (cents > toCents(product.balance)) {
-      errors.amount = `Amount exceeds the available balance of ${formatRand(product.balance)}.`
+    if (cents > toCents(product.availableBalance)) {
+      errors.amount = `Amount exceeds the available balance of ${formatRand(product.availableBalance)}${onHoldNote(product)}.`
     } else if (cents > toCents(product.maxWithdrawalAmount)) {
-      errors.amount = `You can withdraw at most 90% of the balance: ${formatRand(product.maxWithdrawalAmount)}.`
+      errors.amount = `You can withdraw at most 90% of the available balance: ${formatRand(product.maxWithdrawalAmount)}.`
     }
   }
   return errors
+}
+
+// Explains why the available balance is lower than the balance, with the same wording as the server.
+function onHoldNote(product: ProductResponse): string {
+  return product.heldAmount > 0
+    ? ` (${formatRand(product.heldAmount)} is on hold for open withdrawal notices)`
+    : ''
 }
 
 /** Filter dates are yyyy-MM-dd strings, and those compare correctly as plain strings. */

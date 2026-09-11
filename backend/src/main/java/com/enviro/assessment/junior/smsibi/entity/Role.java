@@ -5,9 +5,12 @@ package com.enviro.assessment.junior.smsibi.entity;
  */
 public enum Role {
 
-    /** An investor: can view, and withdraw from, their own portfolio only. */
+    /** An investor: can view their own portfolio, and submit and cancel withdrawal notices on it. */
     INVESTOR,
 
-    /** Enviro365 staff: can view every investor's portfolio and history, but cannot submit withdrawals. */
+    /**
+     * Enviro365 staff: can view every investor's portfolio and history, and approve, reject and pay withdrawal notices.
+     * Staff cannot submit withdrawals themselves.
+     */
     ADMIN
 }

@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.enviro.assessment.junior.smsibi.entity.Investor;
 import com.enviro.assessment.junior.smsibi.entity.Product;
 import com.enviro.assessment.junior.smsibi.entity.ProductType;
+import com.enviro.assessment.junior.smsibi.entity.WithdrawalNotice;
 import com.enviro.assessment.junior.smsibi.exception.BusinessRuleException;
 import com.enviro.assessment.junior.smsibi.exception.RuleViolation;
 import java.math.BigDecimal;
@@ -123,6 +124,36 @@ class WithdrawalPolicyTest {
         }
     }
 
+    /** Money on hold for open notices is not available to new ones. */
+    @Nested
+    class MoneyOnHold {
+
+        @Test
+        void theLimitIs90PercentOfTheAvailableBalance() {
+            Product product = savings("10000.00");
+            openNotice(product, "9000.00"); // leaves R 1,000.00 available
+
+            assertThat(policy.maxWithdrawalAmount(product, TODAY)).isEqualByComparingTo("900.00");
+            assertThatCode(() -> policy.validate(product, new BigDecimal("900.00"), TODAY))
+                    .doesNotThrowAnyException();
+            assertViolation(product, "900.01", RuleViolation.EXCEEDS_WITHDRAWAL_LIMIT);
+        }
+
+        @Test
+        void theBalanceMessageExplainsWhatIsOnHold() {
+            Product product = savings("10000.00");
+            openNotice(product, "9000.00");
+
+            assertThatThrownBy(() -> policy.validate(product, new BigDecimal("1500.00"), TODAY))
+                    .isInstanceOfSatisfying(BusinessRuleException.class, ex -> {
+                        assertThat(ex.getViolation()).isEqualTo(RuleViolation.INSUFFICIENT_BALANCE);
+                        assertThat(ex.getMessage())
+                                .isEqualTo("Withdrawal amount of R 1,500.00 exceeds the available balance of"
+                                        + " R 1,000.00 (R 9,000.00 is on hold for open withdrawal notices).");
+                    });
+        }
+    }
+
     @Nested
     class MaxWithdrawalAmount {
 
@@ -147,6 +178,10 @@ class WithdrawalPolicyTest {
         assertThatThrownBy(() -> policy.validate(product, new BigDecimal(amount), TODAY))
                 .isInstanceOfSatisfying(BusinessRuleException.class, ex -> assertThat(ex.getViolation())
                         .isEqualTo(expected));
+    }
+
+    private static void openNotice(Product product, String amount) {
+        WithdrawalNotice.submit(product, new BigDecimal(amount), TODAY.atTime(9, 0));
     }
 
     private static Investor investorBornOn(LocalDate dateOfBirth) {

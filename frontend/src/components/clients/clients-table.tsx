@@ -1,12 +1,13 @@
 import { ChevronRightIcon } from 'lucide-react'
 import { Link } from 'react-router'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { InvestorSummary } from '@/types'
 import { formatDateTime, formatRand } from '@/utils/format'
 
-const COLUMNS = 7
+const COLUMNS = 8
 
 interface ClientsTableProps {
   clients: InvestorSummary[] | undefined
@@ -36,7 +37,15 @@ export function ClientsTable({ clients, loading }: ClientsTableProps) {
         <TableCell className="text-right tabular-nums">{client.age}</TableCell>
         <TableCell className="text-right tabular-nums">{client.productCount}</TableCell>
         <TableCell className="text-right tabular-nums">{formatRand(client.totalBalance)}</TableCell>
-        <TableCell className="text-right tabular-nums">{client.withdrawalCount}</TableCell>
+        <TableCell className="text-right tabular-nums">
+          {client.openNoticeCount > 0 && (
+            <Badge variant="outline" className="mr-2">
+              {client.openNoticeCount} open
+            </Badge>
+          )}
+          {client.withdrawalCount}
+        </TableCell>
+        <TableCell className="text-right tabular-nums">{formatRand(client.totalWithdrawn)}</TableCell>
         <TableCell className="whitespace-nowrap text-muted-foreground">
           {client.lastWithdrawalAt ? formatDateTime(client.lastWithdrawalAt) : 'None yet'}
         </TableCell>
@@ -70,6 +79,7 @@ export function ClientsTable({ clients, loading }: ClientsTableProps) {
             <TableHead className="text-right">Products</TableHead>
             <TableHead className="text-right">Total balance</TableHead>
             <TableHead className="text-right">Notices</TableHead>
+            <TableHead className="text-right">Paid out</TableHead>
             <TableHead>Last notice</TableHead>
             <TableHead className="text-right">
               <span className="sr-only">Actions</span>

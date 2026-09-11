@@ -28,23 +28,42 @@ public interface WithdrawalNoticeRepository
     @EntityGraph(attributePaths = {"product", "product.investor"})
     Optional<WithdrawalNotice> findWithDetailsById(Long id);
 
-    /** One row per investor who has withdrawn: number of notices, total withdrawn and the latest notice's time. */
+    /**
+     * One row per investor who has submitted notices: how many (any status), how many are still open, the total paid
+     * out and when the latest notice was submitted.
+     *
+     * <p>COUNT and SUM skip NULLs, and "case when ... then x end" is NULL when the condition is false, so each of those
+     * columns only counts or adds up the notices that match. Enum values are referenced by their full class name.
+     */
     @Query("""
-            select w.product.investor.id as investorId, count(w) as withdrawalCount,
-                   sum(w.amount) as totalWithdrawn, max(w.createdAt) as lastWithdrawalAt
+            select w.product.investor.id as investorId,
+                   count(w) as withdrawalCount,
+                   count(case when w.status in (com.enviro.assessment.junior.smsibi.entity.NoticeStatus.PENDING,
+                                                com.enviro.assessment.junior.smsibi.entity.NoticeStatus.APPROVED)
+                              then 1 end) as openNoticeCount,
+                   sum(case when w.status = com.enviro.assessment.junior.smsibi.entity.NoticeStatus.PAID
+                            then w.amount end) as totalWithdrawn,
+                   max(w.createdAt) as lastWithdrawalAt
             from WithdrawalNotice w
             group by w.product.investor.id
             """)
     List<InvestorWithdrawalTotals> totalsPerInvestor();
 
-    /** Number of notices and total withdrawn across all clients (always exactly one row). */
-    @Query("select count(w) as noticeCount, sum(w.amount) as totalAmount from WithdrawalNotice w")
-    NoticeTotals overallTotals();
+    /** The number of notices and their combined amount for each status (one row per status that occurs). */
+    @Query("""
+            select w.status as status, count(w) as noticeCount, sum(w.amount) as totalAmount
+            from WithdrawalNotice w
+            group by w.status
+            """)
+    List<StatusTotals> totalsPerStatus();
+
+    /** Notices submitted on or after {@code since}, whatever their status. */
+    long countByCreatedAtGreaterThanEqual(LocalDateTime since);
 
     /**
-     * Just the two values the dashboard chart needs, for notices submitted on or after {@code since}. Selecting only
-     * these columns, rather than whole entities with their product and investor, keeps the query light.
+     * When and how much was paid out, for notices paid on or after {@code since} (paidAt is only set on paid notices).
+     * Selecting just these two columns, rather than whole entities with their product and investor, keeps it light.
      */
-    @Query("select w.createdAt as createdAt, w.amount as amount from WithdrawalNotice w where w.createdAt >= :since")
-    List<NoticeAmount> amountsSince(@Param("since") LocalDateTime since);
+    @Query("select w.paidAt as paidAt, w.amount as amount from WithdrawalNotice w where w.paidAt >= :since")
+    List<PaidAmount> paidSince(@Param("since") LocalDateTime since);
 }

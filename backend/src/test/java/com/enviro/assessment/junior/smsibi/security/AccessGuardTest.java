@@ -5,14 +5,17 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalFilter;
+import com.enviro.assessment.junior.smsibi.entity.NoticeStatus;
 import com.enviro.assessment.junior.smsibi.exception.AccessForbiddenException;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class AccessGuardTest {
 
     private static final LocalDate FROM = LocalDate.of(2026, 1, 1);
     private static final LocalDate TO = LocalDate.of(2026, 3, 31);
+    private static final List<NoticeStatus> OPEN = List.of(NoticeStatus.PENDING, NoticeStatus.APPROVED);
 
     @Test
     void investorsCanAccessOnlyTheirOwnPortfolio() {
@@ -32,21 +35,22 @@ class AccessGuardTest {
     @Test
     void investorHistoryIsAlwaysScopedToTheirOwnInvestorId() {
         WithdrawalFilter scoped =
-                AccessGuard.restrictToUser(new WithdrawalFilter(null, 3L, FROM, TO), TestUsers.investor(7L));
+                AccessGuard.restrictToUser(new WithdrawalFilter(null, 3L, FROM, TO, OPEN), TestUsers.investor(7L));
 
-        assertThat(scoped).isEqualTo(new WithdrawalFilter(7L, 3L, FROM, TO));
+        // The other filters are kept as they were.
+        assertThat(scoped).isEqualTo(new WithdrawalFilter(7L, 3L, FROM, TO, OPEN));
     }
 
     @Test
     void investorCannotAskForAnotherInvestorsHistory() {
-        assertThatThrownBy(() ->
-                        AccessGuard.restrictToUser(new WithdrawalFilter(8L, null, null, null), TestUsers.investor(7L)))
+        assertThatThrownBy(() -> AccessGuard.restrictToUser(
+                        new WithdrawalFilter(8L, null, null, null, null), TestUsers.investor(7L)))
                 .isInstanceOf(AccessForbiddenException.class);
     }
 
     @Test
     void staffFiltersAreLeftUnchanged() {
-        WithdrawalFilter filter = new WithdrawalFilter(8L, null, FROM, null);
+        WithdrawalFilter filter = new WithdrawalFilter(8L, null, FROM, null, OPEN);
 
         assertThat(AccessGuard.restrictToUser(filter, TestUsers.admin())).isSameAs(filter);
     }

@@ -54,13 +54,23 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
-    /** Raised by the {@code @Version} check when two requests updated the same product at the same time. */
+    /** Raised by the {@code @Version} check when two requests changed the same product or notice at the same time. */
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ProblemDetail handleConcurrentUpdate(OptimisticLockingFailureException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.CONFLICT,
-                "This product was updated by another request at the same time. Please refresh and try again.");
+                "This record was changed by another request at the same time. Please refresh and try again.");
         problem.setTitle("Concurrent update");
+        return problem;
+    }
+
+    /** 409: the notice is not in a state that allows this step, usually because someone else acted on it first. */
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ProblemDetail handleInvalidTransition(InvalidStatusTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Notice status conflict");
+        problem.setProperty("code", "INVALID_STATUS_TRANSITION");
+        problem.setProperty("currentStatus", ex.getCurrentStatus().name());
         return problem;
     }
 

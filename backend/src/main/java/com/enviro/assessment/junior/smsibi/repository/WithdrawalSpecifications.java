@@ -28,8 +28,11 @@ public final class WithdrawalSpecifications {
             if (filter.investorId() != null) {
                 predicates.add(cb.equal(root.get("product").get("investor").get("id"), filter.investorId()));
             }
-            // Date filters are inclusive of whole days: "to = 2026-09-10" must include 23:59 on that day,
-            // so we compare against midnight at the START of the following day.
+            if (filter.status() != null && !filter.status().isEmpty()) {
+                predicates.add(root.get("status").in(filter.status()));
+            }
+            // Date filters apply to the submission date and include whole days: "to = 2026-09-10" must include 23:59
+            // on that day, so we compare against midnight at the START of the following day.
             if (filter.from() != null) {
                 predicates.add(cb.greaterThanOrEqualTo(
                         root.<LocalDateTime>get("createdAt"), filter.from().atStartOfDay()));

@@ -15,7 +15,7 @@ const DEMO_ACCOUNTS = [
   { username: 'thabo.mokoena@example.com', label: 'Thabo, 70: retirement withdrawals allowed' },
   { username: 'sipho.ndlovu@example.com', label: 'Sipho, exactly 65: retirement blocked' },
   { username: 'lerato.dlamini@example.com', label: 'Lerato, 40: savings only' },
-  { username: 'admin@enviro365.example', label: 'Enviro365 staff: read-only, all investors' },
+  { username: 'admin@enviro365.example', label: 'Enviro365 staff: reviews and pays notices' },
 ]
 
 type LoginFormProps = ComponentProps<'div'> & {

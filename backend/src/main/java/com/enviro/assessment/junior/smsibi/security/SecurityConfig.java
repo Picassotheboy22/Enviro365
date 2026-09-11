@@ -82,6 +82,15 @@ public class SecurityConfig {
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/withdrawals")
                         .hasRole("INVESTOR")
+                        // The notice workflow: staff review and pay notices; only investors cancel their own.
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/withdrawals/*/approve",
+                                "/api/withdrawals/*/reject",
+                                "/api/withdrawals/*/pay")
+                        .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/withdrawals/*/cancel")
+                        .hasRole("INVESTOR")
                         .requestMatchers("/api/**")
                         .authenticated()
                         // Deny by default: anything not listed above is refused.

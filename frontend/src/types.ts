@@ -6,6 +6,15 @@ export type ProductType = 'RETIREMENT' | 'SAVINGS'
 
 export type Role = 'INVESTOR' | 'ADMIN'
 
+/**
+ * Where a withdrawal notice is in its workflow: submitted (PENDING), approved by staff (APPROVED), then paid out (PAID).
+ * Staff can reject a pending notice, and the investor can cancel it.
+ */
+export type NoticeStatus = 'PENDING' | 'APPROVED' | 'PAID' | 'REJECTED' | 'CANCELLED'
+
+/** The workflow steps, each a POST to /api/withdrawals/{id}/{action}. */
+export type NoticeAction = 'approve' | 'reject' | 'pay' | 'cancel'
+
 /** GET /api/auth/me */
 export interface CurrentUser {
   username: string
@@ -23,7 +32,11 @@ export interface InvestorSummary {
   age: number
   productCount: number
   totalBalance: number
+  /** Notices submitted, whatever their status. */
   withdrawalCount: number
+  /** Notices that are still pending or approved. */
+  openNoticeCount: number
+  /** The total paid out. */
   totalWithdrawn: number
   /** When the latest withdrawal notice was submitted; null if there are none. */
   lastWithdrawalAt: string | null
@@ -45,7 +58,11 @@ export interface ProductResponse {
   name: string
   type: ProductType
   balance: number
-  /** 90% of the balance, or 0 when the product is restricted. Calculated by the server. */
+  /** The total of the product's open (pending or approved) notices. */
+  heldAmount: number
+  /** The balance minus the held amount: what new notices can draw on. */
+  availableBalance: number
+  /** 90% of the available balance, or 0 when the product is restricted. Calculated by the server. */
   maxWithdrawalAmount: number
   withdrawalAllowed: boolean
   restrictionReason: string | null
@@ -70,9 +87,20 @@ export interface WithdrawalResponse {
   productName: string
   productType: ProductType
   amount: number
-  balanceBefore: number
-  balanceAfter: number
-  createdAt: string // ISO local date-time, e.g. "2026-09-10T14:03:00"
+  status: NoticeStatus
+  /** The product balance just before and after the payment. Null until the notice is paid. */
+  balanceBefore: number | null
+  balanceAfter: number | null
+  /** When the investor submitted the notice. ISO local date-time, e.g. "2026-09-10T14:03:00". */
+  createdAt: string
+  /** The staff member who approved or rejected the notice. */
+  reviewedBy: string | null
+  reviewedAt: string | null
+  /** Why staff rejected the notice. The investor sees this. */
+  rejectionReason: string | null
+  paidBy: string | null
+  paidAt: string | null
+  cancelledAt: string | null
 }
 
 /** Optional filters for history and CSV export. Undefined fields are left out of the query string. */
@@ -81,6 +109,8 @@ export interface WithdrawalFilter {
   productId?: number
   from?: string // yyyy-MM-dd, inclusive
   to?: string // yyyy-MM-dd, inclusive
+  /** Only these statuses. Sent as a repeated parameter: status=PENDING&status=APPROVED. */
+  status?: NoticeStatus[]
 }
 
 export interface ProductTypeTotal {
@@ -92,7 +122,9 @@ export interface ProductTypeTotal {
 export interface MonthlyWithdrawals {
   /** Calendar month as "yyyy-MM", e.g. "2026-09". */
   month: string
+  /** Notices paid in the month. */
   noticeCount: number
+  /** The amount paid out in the month. */
   amount: number
 }
 
@@ -102,13 +134,25 @@ export interface DashboardResponse {
   productCount: number
   assetsUnderManagement: number
   retirementEligibleClients: number
+  /** Notices submitted, whatever their status. */
   noticeCount: number
+  /** Pending notices, waiting for staff to approve or reject them. */
+  awaitingApproval: number
+  /** Approved notices, waiting to be paid. */
+  awaitingPayment: number
+  /** The total of all open (pending and approved) notices. */
+  amountOnHold: number
+  paidCount: number
+  /** The total paid out. */
   totalWithdrawn: number
+  /** The average paid notice. */
   averageWithdrawal: number
+  /** Notices submitted in the last 30 days. */
   noticesLast30Days: number
+  /** The amount paid out in the last 30 days. */
   withdrawnLast30Days: number
   assetsByProductType: ProductTypeTotal[]
-  /** The last six months, oldest first, including months without notices. */
+  /** Payments in each of the last six months, oldest first, including months without payments. */
   withdrawalsByMonth: MonthlyWithdrawals[]
 }
 
@@ -119,8 +163,10 @@ export interface ProblemDetail {
   status?: number
   detail?: string
   instance?: string
-  /** Business-rule code, e.g. "EXCEEDS_WITHDRAWAL_LIMIT" (422 responses only). */
+  /** Machine-readable code, e.g. "EXCEEDS_WITHDRAWAL_LIMIT" (422) or "INVALID_STATUS_TRANSITION" (409). */
   code?: string
+  /** The notice's status when a workflow step was refused (409 responses only). */
+  currentStatus?: NoticeStatus
   /** Field name -> message (400 validation responses only). */
   errors?: Record<string, string>
 }

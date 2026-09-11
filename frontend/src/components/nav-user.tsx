@@ -81,7 +81,7 @@ export function NavUser({ user }: { user: CurrentUser }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled>
               <ShieldCheckIcon />
-              {user.role === 'ADMIN' ? 'Enviro365 staff (read-only)' : 'Investor account'}
+              {user.role === 'ADMIN' ? 'Enviro365 staff' : 'Investor account'}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={signingOut} onSelect={() => void handleSignOut()}>

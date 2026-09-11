@@ -36,8 +36,9 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>Sipho, exactly 65: NOT eligible (the rule is strictly "older than 65");</li>
  *   <li>Lerato, 40: NOT eligible for retirement, but can withdraw from savings.</li>
  * </ul>
- * It also creates sign-in accounts: one per investor (username = e-mail address) and one read-only staff account. The
- * demo password comes from {@code app.seed.demo-password}, so it is configuration rather than code.
+ * It also creates sign-in accounts: one per investor (username = e-mail address) and one staff account, which reviews
+ * and pays withdrawal notices. The demo password comes from {@code app.seed.demo-password}, so it is configuration
+ * rather than code.
  */
 @Component
 @ConditionalOnProperty(name = "app.seed.enabled", havingValue = "true")
@@ -107,12 +108,22 @@ public class DataSeeder implements ApplicationRunner {
         product(lerato, "Retirement Annuity", ProductType.RETIREMENT, "310000.00");
         Product leratoSavings = product(lerato, "Unit Trust Portfolio", ProductType.SAVINGS, "45500.00");
 
-        // A little history, so the history table, filters and CSV export have something to show on first run.
-        pastWithdrawal(thaboRetirement, "25000.00", now.minusDays(62));
-        pastWithdrawal(leratoSavings, "5000.00", now.minusDays(45));
-        pastWithdrawal(thaboSavings, "10000.00", now.minusDays(30));
-        pastWithdrawal(siphoSavings, "7500.00", now.minusDays(14));
-        pastWithdrawal(thaboRetirement, "15000.00", now.minusDays(7));
+        // A little history in every state of the workflow, so the tables, filters, dashboard and CSV export have
+        // something to show on first run. Oldest first, so the balances add up in order.
+        paid(thaboRetirement, "25000.00", now.minusDays(62));
+        paid(leratoSavings, "5000.00", now.minusDays(45));
+        paid(thaboSavings, "10000.00", now.minusDays(30));
+        submitted(thaboSavings, "4000.00", now.minusDays(20))
+                .cancel(now.minusDays(20).plusHours(3));
+        paid(siphoSavings, "7500.00", now.minusDays(14));
+        submitted(siphoSavings, "3000.00", now.minusDays(10))
+                .reject(
+                        STAFF_USERNAME,
+                        now.minusDays(9),
+                        "We could not verify the bank account details on file. Please contact us before submitting"
+                                + " again.");
+        submitted(thaboRetirement, "15000.00", now.minusDays(7)).approve(STAFF_USERNAME, now.minusDays(6));
+        submitted(leratoSavings, "2000.00", now.minusDays(2)); // still pending
 
         // encode() is called once per account: BCrypt generates a new random salt each time, so identical demo
         // passwords still produce different hashes.
@@ -134,10 +145,14 @@ public class DataSeeder implements ApplicationRunner {
         return productRepository.save(new Product(investor, name, type, new BigDecimal(balance)));
     }
 
-    private void pastWithdrawal(Product product, String amount, LocalDateTime when) {
-        BigDecimal value = new BigDecimal(amount);
-        BigDecimal before = product.getBalance();
-        product.withdraw(value);
-        noticeRepository.save(new WithdrawalNotice(product, value, before, product.getBalance(), when));
+    private WithdrawalNotice submitted(Product product, String amount, LocalDateTime when) {
+        return noticeRepository.save(WithdrawalNotice.submit(product, new BigDecimal(amount), when));
+    }
+
+    // Submitted, approved a few hours later and paid the next day.
+    private void paid(Product product, String amount, LocalDateTime when) {
+        WithdrawalNotice notice = submitted(product, amount, when);
+        notice.approve(STAFF_USERNAME, when.plusHours(4));
+        notice.markPaid(STAFF_USERNAME, when.plusDays(1));
     }
 }

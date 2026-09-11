@@ -11,6 +11,7 @@ function client(id: number, totalBalance: number): InvestorSummary {
     productCount: 1,
     totalBalance,
     withdrawalCount: 0,
+    openNoticeCount: 0,
     totalWithdrawn: 0,
     lastWithdrawalAt: null,
   }

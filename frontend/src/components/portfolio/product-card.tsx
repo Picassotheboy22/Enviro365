@@ -16,7 +16,7 @@ export function ProductCard({ product }: { product: ProductResponse }) {
           </Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="text-sm">
+      <CardContent className="grid gap-1 text-sm">
         {product.withdrawalAllowed ? (
           <p className="text-muted-foreground">
             Available to withdraw:{' '}
@@ -28,6 +28,12 @@ export function ProductCard({ product }: { product: ProductResponse }) {
           <p className="flex items-start gap-2 text-destructive">
             <LockIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             {product.restrictionReason}
+          </p>
+        )}
+        {product.heldAmount > 0 && (
+          <p className="text-muted-foreground">
+            On hold for open notices:{' '}
+            <span className="font-medium text-foreground tabular-nums">{formatRand(product.heldAmount)}</span>
           </p>
         )}
       </CardContent>

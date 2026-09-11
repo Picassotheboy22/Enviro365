@@ -7,6 +7,8 @@ const savings: ProductResponse = {
   name: 'Unit Trust',
   type: 'SAVINGS',
   balance: 1000,
+  heldAmount: 0,
+  availableBalance: 1000,
   maxWithdrawalAmount: 900,
   withdrawalAllowed: true,
   restrictionReason: null,
@@ -17,6 +19,8 @@ const restrictedRetirement: ProductResponse = {
   name: 'Retirement Annuity',
   type: 'RETIREMENT',
   balance: 50000,
+  heldAmount: 0,
+  availableBalance: 50000,
   maxWithdrawalAmount: 0,
   withdrawalAllowed: false,
   restrictionReason:
@@ -38,6 +42,21 @@ describe('validateWithdrawal', () => {
 
   it('rejects more than the balance with a balance-specific message', () => {
     expect(validateWithdrawal(savings, '1000.01').amount).toMatch(/exceeds the available balance/)
+  })
+
+  it('counts money on hold for open notices against the balance', () => {
+    const withHold: ProductResponse = {
+      ...savings,
+      heldAmount: 400,
+      availableBalance: 600,
+      maxWithdrawalAmount: 540,
+    }
+
+    expect(validateWithdrawal(withHold, '540.00')).toEqual({})
+    expect(validateWithdrawal(withHold, '540.01').amount).toMatch(/at most 90%/)
+    expect(validateWithdrawal(withHold, '700').amount).toBe(
+      'Amount exceeds the available balance of R 600.00 (R 400.00 is on hold for open withdrawal notices).',
+    )
   })
 
   it('requires a product', () => {

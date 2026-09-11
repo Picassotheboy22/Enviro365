@@ -26,7 +26,7 @@ public final class DtoMapper {
 
     /**
      * @param productTotals    the investor's product totals, or {@code null} if they hold no products
-     * @param withdrawalTotals the investor's withdrawal totals, or {@code null} if they have never withdrawn
+     * @param withdrawalTotals the investor's notice totals, or {@code null} if they have never submitted a notice
      */
     public static InvestorSummary toSummary(
             Investor investor,
@@ -34,6 +34,10 @@ public final class DtoMapper {
             InvestorProductTotals productTotals,
             InvestorWithdrawalTotals withdrawalTotals) {
         BigDecimal zero = BigDecimal.ZERO.setScale(2);
+        boolean noNotices = withdrawalTotals == null;
+        // The paid total is also null when the investor has notices but none of them has been paid yet.
+        BigDecimal totalWithdrawn =
+                noNotices || withdrawalTotals.getTotalWithdrawn() == null ? zero : withdrawalTotals.getTotalWithdrawn();
         return new InvestorSummary(
                 investor.getId(),
                 investor.getFullName(),
@@ -41,9 +45,10 @@ public final class DtoMapper {
                 investor.ageOn(today),
                 productTotals == null ? 0 : productTotals.getProductCount().intValue(),
                 productTotals == null ? zero : productTotals.getTotalBalance(),
-                withdrawalTotals == null ? 0 : withdrawalTotals.getWithdrawalCount(),
-                withdrawalTotals == null ? zero : withdrawalTotals.getTotalWithdrawn(),
-                withdrawalTotals == null ? null : withdrawalTotals.getLastWithdrawalAt());
+                noNotices ? 0 : withdrawalTotals.getWithdrawalCount(),
+                noNotices ? 0 : withdrawalTotals.getOpenNoticeCount(),
+                totalWithdrawn,
+                noNotices ? null : withdrawalTotals.getLastWithdrawalAt());
     }
 
     public static InvestorDetails toDetails(Investor investor, LocalDate today) {
@@ -68,6 +73,8 @@ public final class DtoMapper {
                 product.getName(),
                 product.getType(),
                 product.getBalance(),
+                product.getHeldAmount(),
+                product.getAvailableBalance(),
                 maxWithdrawalAmount,
                 restrictionReason == null,
                 restrictionReason);
@@ -84,8 +91,15 @@ public final class DtoMapper {
                 product.getName(),
                 product.getType(),
                 notice.getAmount(),
+                notice.getStatus(),
                 notice.getBalanceBefore(),
                 notice.getBalanceAfter(),
-                notice.getCreatedAt());
+                notice.getCreatedAt(),
+                notice.getReviewedBy(),
+                notice.getReviewedAt(),
+                notice.getRejectionReason(),
+                notice.getPaidBy(),
+                notice.getPaidAt(),
+                notice.getCancelledAt());
     }
 }

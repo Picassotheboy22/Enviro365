@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-/** Staff: a read-only view of one client's portfolio, opened from the Clients overview (/clients/3). */
+/** Staff: one client's portfolio and notices, opened from the Clients overview (/clients/3). */
 export function ClientPage() {
   const user = useCurrentUser()
   const isStaff = user.role === 'ADMIN'
@@ -46,7 +46,8 @@ export function ClientPage() {
           </Breadcrumb>
         ),
         title: investor.fullName,
-        description: "A read-only view of this client's portfolio and withdrawal notices.",
+        description:
+          "This client's portfolio and withdrawal notices. Review and pay their open notices below.",
         actions: (
           <Select value={String(investorId)} onValueChange={(value) => void navigate(`/clients/${value}`)}>
             <SelectTrigger className="w-60" aria-label="Switch client">

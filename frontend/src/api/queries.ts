@@ -1,4 +1,11 @@
-import { keepPreviousData, skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { WithdrawalFilter, WithdrawalRequest } from '@/types'
 
@@ -43,18 +50,47 @@ export function useWithdrawals(filter: WithdrawalFilter | null) {
   })
 }
 
+/**
+ * Any change to a notice can move money (a hold placed or released, a balance deducted) and changes the history, the
+ * client totals and the dashboard, so every screen that shows them fetches again.
+ */
+function refreshNoticeData(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.portfolios }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.withdrawals }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.investors }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.dashboard }),
+  ])
+}
+
 export function useCreateWithdrawal() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (request: WithdrawalRequest) => api.createWithdrawal(request),
-    onSuccess: async () => {
-      // Balances, history and totals changed on the server: refetch everything that shows them.
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.portfolios }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.withdrawals }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.investors }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard }),
-      ])
+    onSuccess: () => refreshNoticeData(queryClient),
+  })
+}
+
+/** One step of the notice workflow. Only a rejection carries extra data: the reason the investor will see. */
+export type NoticeChange =
+  { action: 'approve' | 'pay' | 'cancel'; id: number } | { action: 'reject'; id: number; reason: string }
+
+export function useNoticeAction() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (change: NoticeChange) => {
+      switch (change.action) {
+        case 'approve':
+          return api.approveNotice(change.id)
+        case 'reject':
+          return api.rejectNotice(change.id, change.reason)
+        case 'pay':
+          return api.payNotice(change.id)
+        case 'cancel':
+          return api.cancelNotice(change.id)
+      }
     },
+    // Refresh after errors as well: a 409 means someone else changed the notice first, so show its current state.
+    onSettled: () => refreshNoticeData(queryClient),
   })
 }

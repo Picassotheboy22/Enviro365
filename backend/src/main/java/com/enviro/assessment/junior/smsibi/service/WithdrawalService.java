@@ -3,6 +3,7 @@ package com.enviro.assessment.junior.smsibi.service;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalFilter;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalRequest;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalResponse;
+import com.enviro.assessment.junior.smsibi.entity.NoticeStatus;
 import com.enviro.assessment.junior.smsibi.entity.Product;
 import com.enviro.assessment.junior.smsibi.entity.WithdrawalNotice;
 import com.enviro.assessment.junior.smsibi.exception.AccessForbiddenException;
@@ -27,7 +28,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Use cases for withdrawal notices: create one (with ownership, rule checks and balance calculation) and query history.
+ * Use cases for withdrawal notices: submit one, move it through the workflow, and query history.
+ *
+ * <p>The workflow: an investor submits a notice (PENDING, and the amount is put on hold), staff approve it (APPROVED)
+ * and then mark it as paid (PAID, and the amount leaves the balance). Staff can reject a pending notice with a reason,
+ * and the investor can cancel it while it is still pending. Both release the hold. {@link NoticeStatus} defines which
+ * moves exist; this class decides who may make each one.
+ *
+ * <p>Every method that changes data is {@code @Transactional}: a notice and its product change together or not at
+ * all, so money can never be held without a notice (or the other way round). Changes to managed entities are saved
+ * automatically when the transaction commits.
  */
 @Service
 public class WithdrawalService {
@@ -55,17 +65,14 @@ public class WithdrawalService {
     }
 
     /**
-     * Validates and records a withdrawal, and deducts it from the product balance. Only the investor who owns the
-     * product may withdraw; staff accounts are read-only.
-     *
-     * <p>{@code @Transactional}: the balance update and the notice insert either both succeed or both roll back, so a
-     * notice can never exist without its balance being deducted (or the other way round). The product's balance
-     * change is saved automatically at commit, because it is a managed entity.
+     * Validates a new notice and submits it as PENDING, putting the amount on hold. Only the investor who owns the
+     * product may do this. Nothing is deducted from the balance until staff pay the notice.
      */
     @Transactional
     public WithdrawalResponse createWithdrawal(WithdrawalRequest request, AuthenticatedUser user) {
         if (user.isAdmin()) {
-            throw new AccessForbiddenException("Staff accounts are read-only and cannot submit withdrawals.");
+            throw new AccessForbiddenException(
+                    "Staff accounts cannot submit withdrawals. Only the investor who owns a product can.");
         }
         Product product = productRepository
                 .findById(request.productId())
@@ -76,30 +83,63 @@ public class WithdrawalService {
         BigDecimal amount = request.amount().setScale(2, RoundingMode.HALF_UP);
         withdrawalPolicy.validate(product, amount, LocalDate.now(clock));
 
-        BigDecimal balanceBefore = product.getBalance();
-        product.withdraw(amount);
+        WithdrawalNotice notice = noticeRepository.save(WithdrawalNotice.submit(product, amount, now()));
+        audit(notice, "submitted", user);
+        return DtoMapper.toWithdrawalResponse(notice);
+    }
 
-        // Truncated to seconds: statements do not need sub-second precision, and the value returned now then matches
-        // what is read back from the database later.
-        LocalDateTime createdAt = LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
-        WithdrawalNotice notice = noticeRepository.save(
-                new WithdrawalNotice(product, amount, balanceBefore, product.getBalance(), createdAt));
+    /**
+     * Staff approve a pending notice. The rules are not checked again: they were checked when the notice was
+     * submitted, and the money has been on hold ever since, so it is still there. Age only goes up, so an investor who
+     * was old enough for a retirement withdrawal still is.
+     */
+    @Transactional
+    public WithdrawalResponse approve(Long noticeId, AuthenticatedUser user) {
+        requireStaff(user);
+        WithdrawalNotice notice = findNotice(noticeId);
+        notice.approve(user.getUsername(), now());
+        audit(notice, "approved", user);
+        return DtoMapper.toWithdrawalResponse(notice);
+    }
 
-        // Audit trail: who withdrew what (never log passwords or session ids).
-        log.info(
-                "Withdrawal notice {} created by {}: {} from product {}",
-                notice.getId(),
-                user.getUsername(),
-                amount,
-                product.getId());
+    /** Staff turn down a pending notice. The investor is shown the reason, and the held amount is released. */
+    @Transactional
+    public WithdrawalResponse reject(Long noticeId, String reason, AuthenticatedUser user) {
+        requireStaff(user);
+        WithdrawalNotice notice = findNotice(noticeId);
+        notice.reject(user.getUsername(), now(), reason.strip());
+        audit(notice, "rejected", user);
+        return DtoMapper.toWithdrawalResponse(notice);
+    }
+
+    /** Staff record that an approved notice has been paid. Only now does the amount leave the product balance. */
+    @Transactional
+    public WithdrawalResponse pay(Long noticeId, AuthenticatedUser user) {
+        requireStaff(user);
+        WithdrawalNotice notice = findNotice(noticeId);
+        notice.markPaid(user.getUsername(), now());
+        audit(notice, "paid", user);
+        return DtoMapper.toWithdrawalResponse(notice);
+    }
+
+    /** The investor withdraws their own notice while it is still pending. The held amount is released. */
+    @Transactional
+    public WithdrawalResponse cancel(Long noticeId, AuthenticatedUser user) {
+        if (user.isAdmin()) {
+            throw new AccessForbiddenException(
+                    "Only the investor who submitted a notice can cancel it. Staff can reject it instead.");
+        }
+        WithdrawalNotice notice = findNotice(noticeId);
+        AccessGuard.requireInvestorAccess(
+                user, notice.getProduct().getInvestor().getId());
+        notice.cancel(now());
+        audit(notice, "cancelled", user);
         return DtoMapper.toWithdrawalResponse(notice);
     }
 
     @Transactional(readOnly = true)
     public WithdrawalResponse getWithdrawal(Long id, AuthenticatedUser user) {
-        WithdrawalNotice notice = noticeRepository
-                .findWithDetailsById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Withdrawal notice", id));
+        WithdrawalNotice notice = findNotice(id);
         AccessGuard.requireInvestorAccess(
                 user, notice.getProduct().getInvestor().getId());
         return DtoMapper.toWithdrawalResponse(notice);
@@ -112,5 +152,35 @@ public class WithdrawalService {
         return noticeRepository.findAll(WithdrawalSpecifications.matching(scoped), NEWEST_FIRST).stream()
                 .map(DtoMapper::toWithdrawalResponse)
                 .toList();
+    }
+
+    // SecurityConfig already limits these URLs to staff; checked again here as defence in depth.
+    private static void requireStaff(AuthenticatedUser user) {
+        if (!user.isAdmin()) {
+            throw new AccessForbiddenException("Only Enviro365 staff can review and pay withdrawal notices.");
+        }
+    }
+
+    private WithdrawalNotice findNotice(Long id) {
+        return noticeRepository
+                .findWithDetailsById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Withdrawal notice", id));
+    }
+
+    // Truncated to seconds: statements do not need sub-second precision, and the value returned now then matches what
+    // is read back from the database later.
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock).truncatedTo(ChronoUnit.SECONDS);
+    }
+
+    // Audit trail: who did what to which notice. Never log passwords, session ids or free text typed by users.
+    private static void audit(WithdrawalNotice notice, String action, AuthenticatedUser user) {
+        log.info(
+                "Withdrawal notice {} {} by {}: {} from product {}",
+                notice.getId(),
+                action,
+                user.getUsername(),
+                notice.getAmount(),
+                notice.getProduct().getId());
     }
 }

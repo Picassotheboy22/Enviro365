@@ -16,9 +16,11 @@ import org.springframework.context.annotation.Configuration;
                 @Info(
                         title = "Enviro365 Withdrawal Notice API",
                         version = "2.0",
-                        description = "View investor portfolios, submit withdrawal notices and export CSV statements. "
-                                + "Sign in first with POST /api/auth/login (form fields username and password); "
-                                + "the session cookie is then sent automatically."),
+                        description =
+                                "View investor portfolios, submit withdrawal notices, move them through the approval workflow "
+                                        + "(pending, approved, paid) and export CSV statements. "
+                                        + "Sign in first with POST /api/auth/login (form fields username and password); "
+                                        + "the session cookie is then sent automatically."),
         security = @SecurityRequirement(name = "session"))
 @SecurityScheme(
         name = "session",

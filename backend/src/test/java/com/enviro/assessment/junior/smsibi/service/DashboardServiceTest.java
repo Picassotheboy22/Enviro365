@@ -8,13 +8,14 @@ import static org.mockito.Mockito.when;
 
 import com.enviro.assessment.junior.smsibi.dto.DashboardResponse;
 import com.enviro.assessment.junior.smsibi.dto.DashboardResponse.MonthlyWithdrawals;
+import com.enviro.assessment.junior.smsibi.entity.NoticeStatus;
 import com.enviro.assessment.junior.smsibi.entity.ProductType;
 import com.enviro.assessment.junior.smsibi.exception.AccessForbiddenException;
 import com.enviro.assessment.junior.smsibi.repository.InvestorRepository;
-import com.enviro.assessment.junior.smsibi.repository.NoticeAmount;
-import com.enviro.assessment.junior.smsibi.repository.NoticeTotals;
+import com.enviro.assessment.junior.smsibi.repository.PaidAmount;
 import com.enviro.assessment.junior.smsibi.repository.ProductRepository;
 import com.enviro.assessment.junior.smsibi.repository.ProductTypeTotals;
+import com.enviro.assessment.junior.smsibi.repository.StatusTotals;
 import com.enviro.assessment.junior.smsibi.repository.WithdrawalNoticeRepository;
 import com.enviro.assessment.junior.smsibi.security.TestUsers;
 import java.math.BigDecimal;
@@ -62,14 +63,21 @@ class DashboardServiceTest {
                 .thenReturn(List.of(
                         new TypeTotals(ProductType.RETIREMENT, 3L, new BigDecimal("1650000.00")),
                         new TypeTotals(ProductType.SAVINGS, 3L, new BigDecimal("208000.00"))));
-        when(noticeRepository.overallTotals()).thenReturn(new Totals(4L, new BigDecimal("60000.00")));
-        // The query must start at the beginning of the chart window: 1 April 2026.
-        when(noticeRepository.amountsSince(LocalDateTime.of(2026, 4, 1, 0, 0)))
+        when(noticeRepository.totalsPerStatus())
                 .thenReturn(List.of(
-                        notice("2026-05-02T09:00", "20000.00"),
-                        notice("2026-08-05T09:00", "25000.00"), // more than 30 days ago
-                        notice("2026-08-20T09:00", "10000.00"),
-                        notice("2026-09-05T09:00", "5000.00")));
+                        new Totals(NoticeStatus.PAID, 4L, new BigDecimal("60000.00")),
+                        new Totals(NoticeStatus.PENDING, 2L, new BigDecimal("3000.00")),
+                        new Totals(NoticeStatus.APPROVED, 1L, new BigDecimal("15000.00")),
+                        new Totals(NoticeStatus.REJECTED, 1L, new BigDecimal("3000.00"))));
+        when(noticeRepository.countByCreatedAtGreaterThanEqual(LocalDateTime.of(2026, 8, 11, 10, 0)))
+                .thenReturn(5L);
+        // The query must start at the beginning of the chart window: 1 April 2026.
+        when(noticeRepository.paidSince(LocalDateTime.of(2026, 4, 1, 0, 0)))
+                .thenReturn(List.of(
+                        payment("2026-05-02T09:00", "20000.00"),
+                        payment("2026-08-05T09:00", "25000.00"), // more than 30 days ago
+                        payment("2026-08-20T09:00", "10000.00"),
+                        payment("2026-09-05T09:00", "5000.00")));
 
         DashboardResponse dashboard = service.getDashboard(TestUsers.admin());
 
@@ -77,10 +85,17 @@ class DashboardServiceTest {
         assertThat(dashboard.retirementEligibleClients()).isEqualTo(1);
         assertThat(dashboard.productCount()).isEqualTo(6);
         assertThat(dashboard.assetsUnderManagement()).isEqualByComparingTo("1858000.00");
-        assertThat(dashboard.noticeCount()).isEqualTo(4);
+
+        // The workflow: every status counts as a notice, open ones hold money, only paid ones count as withdrawn.
+        assertThat(dashboard.noticeCount()).isEqualTo(8);
+        assertThat(dashboard.awaitingApproval()).isEqualTo(2);
+        assertThat(dashboard.awaitingPayment()).isEqualTo(1);
+        assertThat(dashboard.amountOnHold()).isEqualByComparingTo("18000.00");
+        assertThat(dashboard.paidCount()).isEqualTo(4);
         assertThat(dashboard.totalWithdrawn()).isEqualByComparingTo("60000.00");
         assertThat(dashboard.averageWithdrawal()).isEqualByComparingTo("15000.00");
-        assertThat(dashboard.noticesLast30Days()).isEqualTo(2);
+
+        assertThat(dashboard.noticesLast30Days()).isEqualTo(5);
         assertThat(dashboard.withdrawnLast30Days()).isEqualByComparingTo("15000.00");
 
         assertThat(dashboard.withdrawalsByMonth())
@@ -97,12 +112,16 @@ class DashboardServiceTest {
         when(investorRepository.count()).thenReturn(0L);
         when(investorRepository.countByDateOfBirthLessThanEqual(any())).thenReturn(0L);
         when(productRepository.totalsPerProductType()).thenReturn(List.of());
-        when(noticeRepository.overallTotals()).thenReturn(new Totals(0L, null)); // SQL: SUM of no rows is NULL
-        when(noticeRepository.amountsSince(any())).thenReturn(List.of());
+        when(noticeRepository.totalsPerStatus()).thenReturn(List.of()); // no rows at all, not rows of zeros
+        when(noticeRepository.countByCreatedAtGreaterThanEqual(any())).thenReturn(0L);
+        when(noticeRepository.paidSince(any())).thenReturn(List.of());
 
         DashboardResponse dashboard = service.getDashboard(TestUsers.admin());
 
         assertThat(dashboard.assetsUnderManagement()).isEqualByComparingTo("0.00");
+        assertThat(dashboard.noticeCount()).isZero();
+        assertThat(dashboard.awaitingApproval()).isZero();
+        assertThat(dashboard.amountOnHold()).isEqualByComparingTo("0.00");
         assertThat(dashboard.totalWithdrawn()).isEqualByComparingTo("0.00");
         assertThat(dashboard.averageWithdrawal()).isEqualByComparingTo("0.00"); // no division by zero
         assertThat(dashboard.withdrawalsByMonth()).hasSize(6).allSatisfy(month -> assertThat(month.noticeCount())
@@ -117,8 +136,8 @@ class DashboardServiceTest {
         verifyNoInteractions(investorRepository, productRepository, noticeRepository);
     }
 
-    private static NoticeAmount notice(String createdAt, String amount) {
-        return new Amount(LocalDateTime.parse(createdAt), new BigDecimal(amount));
+    private static PaidAmount payment(String paidAt, String amount) {
+        return new Payment(LocalDateTime.parse(paidAt), new BigDecimal(amount));
     }
 
     // Stand-ins for the rows the aggregate queries return. A record component called "getX" generates a getX()
@@ -126,7 +145,8 @@ class DashboardServiceTest {
     private record TypeTotals(ProductType getType, Long getProductCount, BigDecimal getTotalBalance)
             implements ProductTypeTotals {}
 
-    private record Totals(Long getNoticeCount, BigDecimal getTotalAmount) implements NoticeTotals {}
+    private record Totals(NoticeStatus getStatus, Long getNoticeCount, BigDecimal getTotalAmount)
+            implements StatusTotals {}
 
-    private record Amount(LocalDateTime getCreatedAt, BigDecimal getAmount) implements NoticeAmount {}
+    private record Payment(LocalDateTime getPaidAt, BigDecimal getAmount) implements PaidAmount {}
 }

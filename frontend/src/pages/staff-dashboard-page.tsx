@@ -1,8 +1,8 @@
-import { BanknoteIcon, FileTextIcon, UsersIcon, WalletIcon } from 'lucide-react'
+import { BanknoteIcon, InboxIcon, UsersIcon, WalletIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { useDashboard, useInvestors, useWithdrawals } from '@/api/queries'
 import { AssetsByTypeChart } from '@/components/dashboard/assets-by-type-chart'
-import { RecentNotices } from '@/components/dashboard/recent-notices'
+import { NoticeQueue } from '@/components/dashboard/notice-queue'
 import { TopClients } from '@/components/dashboard/top-clients'
 import { WithdrawalsChart } from '@/components/dashboard/withdrawals-chart'
 import { PageHeader } from '@/components/page-header'
@@ -13,9 +13,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { DashboardResponse } from '@/types'
 import { formatRand } from '@/utils/format'
+import { OPEN_STATUSES, oldestFirst } from '@/utils/notices'
 
-const RECENT_NOTICES = 6
+const QUEUE_SIZE = 6
 const TOP_CLIENTS = 5
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
 
 function headlineStats(dashboard: DashboardResponse): Stat[] {
   return [
@@ -29,29 +34,29 @@ function headlineStats(dashboard: DashboardResponse): Stat[] {
       label: 'Assets under management',
       value: formatRand(dashboard.assetsUnderManagement),
       icon: WalletIcon,
-      footnote: `Across ${dashboard.productCount} products`,
+      footnote: `Across ${plural(dashboard.productCount, 'product')}`,
     },
     {
-      label: 'Withdrawal notices',
-      value: String(dashboard.noticeCount),
-      icon: FileTextIcon,
-      footnote: `${dashboard.noticesLast30Days} in the last 30 days`,
+      label: 'Waiting for staff',
+      value: String(dashboard.awaitingApproval + dashboard.awaitingPayment),
+      icon: InboxIcon,
+      footnote: `${dashboard.awaitingApproval} to review, ${dashboard.awaitingPayment} to pay`,
     },
     {
-      label: 'Total withdrawn',
+      label: 'Paid out',
       value: formatRand(dashboard.totalWithdrawn),
       icon: BanknoteIcon,
-      footnote: `Average ${formatRand(dashboard.averageWithdrawal)} per notice`,
+      footnote: `${plural(dashboard.paidCount, 'notice')}, average ${formatRand(dashboard.averageWithdrawal)}`,
     },
   ]
 }
 
-/** Staff home page: statistics across all clients, calculated by the server (GET /api/dashboard). */
+/** Staff home page: the notices waiting for staff, plus statistics across all clients (GET /api/dashboard). */
 export function StaffDashboardPage() {
   const dashboard = useDashboard()
   const clients = useInvestors(true)
-  // No investorId filter: for staff the server returns every client's notices, newest first.
-  const notices = useWithdrawals({})
+  // For staff the server returns every client's notices; only the open ones are needed here.
+  const openNotices = useWithdrawals({ status: OPEN_STATUSES })
 
   if (dashboard.isPending) return <PortfolioSkeleton />
   if (dashboard.isError) return <ErrorState error={dashboard.error} title="Could not load the dashboard" />
@@ -62,7 +67,7 @@ export function StaffDashboardPage() {
     <>
       <PageHeader
         title="Dashboard"
-        description="Enviro365 at a glance: clients, assets under management and withdrawal activity."
+        description="Enviro365 at a glance: the notices waiting for staff, clients, assets under management and payments."
         actions={
           <Button variant="outline" asChild>
             <Link to="/clients">
@@ -78,27 +83,25 @@ export function StaffDashboardPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Withdrawals per month</CardTitle>
+            <CardTitle>Waiting for staff</CardTitle>
             <CardDescription>
-              Amount withdrawn over the last six months. Last 30 days: {formatRand(data.withdrawnLast30Days)}.
+              Open notices, oldest first. {formatRand(data.amountOnHold)} is on hold until they are paid,
+              rejected or cancelled.
             </CardDescription>
+            <CardAction>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/history?status=open">View all</Link>
+              </Button>
+            </CardAction>
           </CardHeader>
           <CardContent>
-            <WithdrawalsChart months={data.withdrawalsByMonth} />
+            {openNotices.isError ? (
+              <ErrorState error={openNotices.error} title="Could not load withdrawal notices" />
+            ) : (
+              <NoticeQueue notices={openNotices.data && oldestFirst(openNotices.data).slice(0, QUEUE_SIZE)} />
+            )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Assets by product type</CardTitle>
-            <CardDescription>Share of assets under management.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AssetsByTypeChart totals={data.assetsByProductType} total={data.assetsUnderManagement} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle>Top clients by balance</CardTitle>
@@ -112,22 +115,28 @@ export function StaffDashboardPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Latest withdrawal notices</CardTitle>
-            <CardDescription>The most recent notices from all clients.</CardDescription>
-            <CardAction>
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/history">View all</Link>
-              </Button>
-            </CardAction>
+            <CardTitle>Paid out per month</CardTitle>
+            <CardDescription>
+              Payments over the last six months. Last 30 days: {formatRand(data.withdrawnLast30Days)} paid,{' '}
+              {plural(data.noticesLast30Days, 'notice')} submitted.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {notices.isError ? (
-              <ErrorState error={notices.error} title="Could not load withdrawal notices" />
-            ) : (
-              <RecentNotices notices={notices.data?.slice(0, RECENT_NOTICES)} />
-            )}
+            <WithdrawalsChart months={data.withdrawalsByMonth} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Assets by product type</CardTitle>
+            <CardDescription>Share of assets under management.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AssetsByTypeChart totals={data.assetsByProductType} total={data.assetsUnderManagement} />
           </CardContent>
         </Card>
       </div>

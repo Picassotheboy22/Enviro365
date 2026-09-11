@@ -56,33 +56,46 @@ class InvestorServiceTest {
     void clientsOverviewCombinesEachClientsTotals() {
         Investor lerato = investor(3L, "Lerato", "Dlamini", LocalDate.of(1986, 2, 10));
         Investor thabo = investor(1L, "Thabo", "Mokoena", LocalDate.of(1956, 5, 10));
-        LocalDateTime lastWithdrawal = LocalDateTime.of(2026, 9, 3, 11, 0);
-        when(investorRepository.findAllByOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(lerato, thabo));
+        Investor sipho = investor(2L, "Sipho", "Ndlovu", LocalDate.of(1961, 7, 10));
+        LocalDateTime thabosLastNotice = LocalDateTime.of(2026, 9, 3, 11, 0);
+        when(investorRepository.findAllByOrderByLastNameAscFirstNameAsc()).thenReturn(List.of(lerato, thabo, sipho));
         when(productRepository.totalsPerInvestor())
                 .thenReturn(List.of(
                         new ProductTotals(1L, 2L, new BigDecimal("920000.00")),
+                        new ProductTotals(2L, 2L, new BigDecimal("592500.00")),
                         new ProductTotals(3L, 2L, new BigDecimal("350500.00"))));
-        // Only Thabo has withdrawn.
         when(noticeRepository.totalsPerInvestor())
-                .thenReturn(List.of(new WithdrawalTotals(1L, 2L, new BigDecimal("40000.00"), lastWithdrawal)));
+                .thenReturn(List.of(
+                        new WithdrawalTotals(1L, 3L, 1L, new BigDecimal("40000.00"), thabosLastNotice),
+                        // Lerato's only notice is still pending, so nothing is paid out: the SUM is NULL.
+                        new WithdrawalTotals(3L, 1L, 1L, null, LocalDateTime.of(2026, 9, 8, 9, 0))));
 
         List<InvestorSummary> summaries = service.listInvestors(TestUsers.admin());
 
-        assertThat(summaries).extracting(InvestorSummary::fullName).containsExactly("Lerato Dlamini", "Thabo Mokoena");
+        assertThat(summaries)
+                .extracting(InvestorSummary::fullName)
+                .containsExactly("Lerato Dlamini", "Thabo Mokoena", "Sipho Ndlovu");
 
         InvestorSummary thaboSummary = summaries.get(1);
         assertThat(thaboSummary.age()).isEqualTo(70);
         assertThat(thaboSummary.productCount()).isEqualTo(2);
         assertThat(thaboSummary.totalBalance()).isEqualByComparingTo("920000.00");
-        assertThat(thaboSummary.withdrawalCount()).isEqualTo(2);
+        assertThat(thaboSummary.withdrawalCount()).isEqualTo(3);
+        assertThat(thaboSummary.openNoticeCount()).isEqualTo(1);
         assertThat(thaboSummary.totalWithdrawn()).isEqualByComparingTo("40000.00");
-        assertThat(thaboSummary.lastWithdrawalAt()).isEqualTo(lastWithdrawal);
+        assertThat(thaboSummary.lastWithdrawalAt()).isEqualTo(thabosLastNotice);
 
-        // A client with no withdrawals gets zeros rather than nulls, and no last date.
         InvestorSummary leratoSummary = summaries.get(0);
-        assertThat(leratoSummary.withdrawalCount()).isZero();
+        assertThat(leratoSummary.withdrawalCount()).isEqualTo(1);
+        assertThat(leratoSummary.openNoticeCount()).isEqualTo(1);
         assertThat(leratoSummary.totalWithdrawn()).isEqualByComparingTo("0.00");
-        assertThat(leratoSummary.lastWithdrawalAt()).isNull();
+
+        // A client with no notices at all gets zeros rather than nulls, and no last date.
+        InvestorSummary siphoSummary = summaries.get(2);
+        assertThat(siphoSummary.withdrawalCount()).isZero();
+        assertThat(siphoSummary.openNoticeCount()).isZero();
+        assertThat(siphoSummary.totalWithdrawn()).isEqualByComparingTo("0.00");
+        assertThat(siphoSummary.lastWithdrawalAt()).isNull();
     }
 
     @Test
@@ -108,6 +121,7 @@ class InvestorServiceTest {
     private record WithdrawalTotals(
             Long getInvestorId,
             Long getWithdrawalCount,
+            Long getOpenNoticeCount,
             BigDecimal getTotalWithdrawn,
             LocalDateTime getLastWithdrawalAt)
             implements InvestorWithdrawalTotals {}

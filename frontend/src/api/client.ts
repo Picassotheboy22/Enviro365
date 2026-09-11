@@ -154,12 +154,29 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T
 }
 
-/** Builds "?investorId=1&from=2026-01-01", leaving out empty filters. */
+/** POST with an optional JSON body, returning the JSON response. */
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const response = await send(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+    contentType: body === undefined ? undefined : 'application/json',
+  })
+  return (await response.json()) as T
+}
+
+/**
+ * Builds "?investorId=1&from=2026-01-01", leaving out empty filters. A list becomes a repeated parameter
+ * ("?status=PENDING&status=APPROVED"), which Spring binds to a List on the server.
+ */
 export function toQueryString(filter: WithdrawalFilter): string {
   const params = new URLSearchParams()
-  for (const [key, value] of Object.entries(filter)) {
-    if (value !== undefined && value !== null && value !== '') {
-      params.set(key, String(value))
+  // Object.entries types every value as any, so the filter's own value types are restored here.
+  for (const [key, value] of Object.entries(filter) as [string, WithdrawalFilter[keyof WithdrawalFilter]][]) {
+    const values: (string | number | undefined)[] = Array.isArray(value) ? value : [value]
+    for (const item of values) {
+      if (item !== undefined && item !== '') {
+        params.append(key, String(item))
+      }
     }
   }
   const query = params.toString()
@@ -212,14 +229,14 @@ export const api = {
   listWithdrawals: (filter: WithdrawalFilter) =>
     getJson<WithdrawalResponse[]>(`/api/withdrawals${toQueryString(filter)}`),
 
-  createWithdrawal: async (request: WithdrawalRequest): Promise<WithdrawalResponse> => {
-    const response = await send('/api/withdrawals', {
-      method: 'POST',
-      body: JSON.stringify(request),
-      contentType: 'application/json',
-    })
-    return (await response.json()) as WithdrawalResponse
-  },
+  createWithdrawal: (request: WithdrawalRequest) => postJson<WithdrawalResponse>('/api/withdrawals', request),
+
+  // The notice workflow. Each step has its own endpoint, so the server can check who may take it.
+  approveNotice: (id: number) => postJson<WithdrawalResponse>(`/api/withdrawals/${id}/approve`),
+  rejectNotice: (id: number, reason: string) =>
+    postJson<WithdrawalResponse>(`/api/withdrawals/${id}/reject`, { reason }),
+  payNotice: (id: number) => postJson<WithdrawalResponse>(`/api/withdrawals/${id}/pay`),
+  cancelNotice: (id: number) => postJson<WithdrawalResponse>(`/api/withdrawals/${id}/cancel`),
 
   /**
    * Downloads the CSV statement. Uses fetch plus a temporary link rather than a plain <a href>, so that if the server

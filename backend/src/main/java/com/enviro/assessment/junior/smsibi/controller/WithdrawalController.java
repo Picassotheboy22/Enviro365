@@ -1,5 +1,6 @@
 package com.enviro.assessment.junior.smsibi.controller;
 
+import com.enviro.assessment.junior.smsibi.dto.RejectionRequest;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalFilter;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalRequest;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalResponse;
@@ -30,7 +31,10 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 @RestController
 @RequestMapping("/api/withdrawals")
-@Tag(name = "Withdrawals", description = "Submit withdrawal notices, view history and export CSV statements")
+@Tag(
+        name = "Withdrawals",
+        description = "Submit withdrawal notices, move them through the approval workflow, view history and export "
+                + "CSV statements")
 public class WithdrawalController {
 
     private static final MediaType TEXT_CSV = new MediaType("text", "csv", StandardCharsets.UTF_8);
@@ -49,7 +53,7 @@ public class WithdrawalController {
      */
     @PostMapping
     @Operation(summary = "Submit a withdrawal notice (investors only, own products only)")
-    @ApiResponse(responseCode = "201", description = "Withdrawal accepted and balance updated")
+    @ApiResponse(responseCode = "201", description = "Notice submitted as PENDING, with the amount on hold")
     @ApiResponse(responseCode = "400", description = "Invalid input (missing product, non-positive amount, ...)")
     @ApiResponse(responseCode = "403", description = "Staff account, another investor's product, or missing CSRF token")
     @ApiResponse(responseCode = "404", description = "Product does not exist")
@@ -64,6 +68,60 @@ public class WithdrawalController {
                 .toUri();
         return ResponseEntity.created(location).body(created);
     }
+
+    // ---- The workflow ----
+    // Each step is its own action (POST /{id}/approve) rather than a generic "PATCH status". Every step has its own
+    // permission and side effects (a hold released, a balance deducted), and a URL per step lets SecurityConfig
+    // restrict each one to the right role.
+
+    @PostMapping("/{id}/approve")
+    @Operation(summary = "Approve a pending notice (staff only)")
+    @ApiResponse(responseCode = "200", description = "Approved. The amount stays on hold until the notice is paid.")
+    @ApiResponse(responseCode = "403", description = "Not a staff account, or missing CSRF token")
+    @ApiResponse(responseCode = "404", description = "Notice does not exist")
+    @ApiResponse(responseCode = "409", description = "The notice is not pending")
+    public WithdrawalResponse approve(
+            @PathVariable Long id, @Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) {
+        return withdrawalService.approve(id, user);
+    }
+
+    @PostMapping("/{id}/reject")
+    @Operation(summary = "Reject a pending notice with a reason for the investor (staff only)")
+    @ApiResponse(responseCode = "200", description = "Rejected. The held amount is available again.")
+    @ApiResponse(responseCode = "400", description = "The reason is missing or too long")
+    @ApiResponse(responseCode = "403", description = "Not a staff account, or missing CSRF token")
+    @ApiResponse(responseCode = "404", description = "Notice does not exist")
+    @ApiResponse(responseCode = "409", description = "The notice is not pending")
+    public WithdrawalResponse reject(
+            @PathVariable Long id,
+            @Valid @RequestBody RejectionRequest request,
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) {
+        return withdrawalService.reject(id, request.reason(), user);
+    }
+
+    @PostMapping("/{id}/pay")
+    @Operation(summary = "Mark an approved notice as paid (staff only)")
+    @ApiResponse(responseCode = "200", description = "Paid. The amount has been deducted from the product balance.")
+    @ApiResponse(responseCode = "403", description = "Not a staff account, or missing CSRF token")
+    @ApiResponse(responseCode = "404", description = "Notice does not exist")
+    @ApiResponse(responseCode = "409", description = "The notice is not approved")
+    public WithdrawalResponse pay(
+            @PathVariable Long id, @Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) {
+        return withdrawalService.pay(id, user);
+    }
+
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "Cancel your own pending notice (investors only)")
+    @ApiResponse(responseCode = "200", description = "Cancelled. The held amount is available again.")
+    @ApiResponse(responseCode = "403", description = "Staff account, another investor's notice, or missing CSRF token")
+    @ApiResponse(responseCode = "404", description = "Notice does not exist")
+    @ApiResponse(responseCode = "409", description = "The notice is not pending")
+    public WithdrawalResponse cancel(
+            @PathVariable Long id, @Parameter(hidden = true) @AuthenticationPrincipal AuthenticatedUser user) {
+        return withdrawalService.cancel(id, user);
+    }
+
+    // ---- Reading ----
 
     @GetMapping("/{id}")
     @Operation(summary = "Get a single withdrawal notice")

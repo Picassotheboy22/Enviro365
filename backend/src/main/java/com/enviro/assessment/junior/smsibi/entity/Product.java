@@ -16,6 +16,14 @@ import java.math.BigDecimal;
 
 /**
  * An investment product (e.g. a retirement annuity or savings account) held by an {@link Investor}.
+ *
+ * <p>Money for open withdrawal notices is put on hold rather than taken out straight away. It stays part of the balance
+ * until the notice is paid, but it cannot be promised to another notice in the meantime:
+ * <pre>
+ *   available balance = balance - held amount
+ * </pre>
+ * The methods that change these amounts are package-private, so only {@link WithdrawalNotice} (in the same package) can
+ * call them. The only way to move money is through the notice workflow.
  */
 @Entity
 @Table(name = "products")
@@ -42,8 +50,13 @@ public class Product {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal balance;
 
-    // Optimistic locking: if two withdrawals on the same product are processed at the same time, the second
-    // commit fails (and the user is asked to retry) instead of silently overwriting the first one's balance.
+    // The total of this product's open (pending or approved) withdrawal notices.
+    @Column(nullable = false, precision = 19, scale = 2)
+    private BigDecimal heldAmount = BigDecimal.ZERO.setScale(2);
+
+    // Optimistic locking: every hold, release and payment changes this row. If two requests change the same product at
+    // the same time, the second commit fails (and the user is asked to retry) instead of silently overwriting the
+    // first. This is what stops two notices submitted at the same moment from both using the same money.
     @Version
     private Long version;
 
@@ -58,15 +71,38 @@ public class Product {
     }
 
     /**
-     * Deducts an amount that has already been checked against the business rules (see WithdrawalPolicy).
-     * The guard below is a last line of defence for the invariant "a balance never goes negative",
-     * even if a future caller forgets to apply the rules first.
+     * Puts money on hold for a new notice. The amount has already been checked against the business rules (see
+     * WithdrawalPolicy). The guards in these methods are a last line of defence for the invariant
+     * "0 &lt;= held amount &lt;= balance", even if a future caller forgets to apply the rules first.
      */
-    public void withdraw(BigDecimal amount) {
-        if (amount.signum() <= 0 || amount.compareTo(balance) > 0) {
-            throw new IllegalArgumentException("Invalid withdrawal amount " + amount + " for balance " + balance);
+    void hold(BigDecimal amount) {
+        requirePositive(amount);
+        if (amount.compareTo(getAvailableBalance()) > 0) {
+            throw new IllegalStateException(
+                    "Cannot hold " + amount + ": only " + getAvailableBalance() + " is available");
         }
-        this.balance = this.balance.subtract(amount);
+        heldAmount = heldAmount.add(amount);
+    }
+
+    /** Returns held money to the available balance, because its notice was rejected or cancelled. */
+    void releaseHold(BigDecimal amount) {
+        requirePositive(amount);
+        if (amount.compareTo(heldAmount) > 0) {
+            throw new IllegalStateException("Cannot release " + amount + ": only " + heldAmount + " is on hold");
+        }
+        heldAmount = heldAmount.subtract(amount);
+    }
+
+    /** Pays out held money. It leaves the hold and the balance together, so the available balance does not change. */
+    void payOut(BigDecimal amount) {
+        releaseHold(amount);
+        balance = balance.subtract(amount);
+    }
+
+    private static void requirePositive(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be positive, but was " + amount);
+        }
     }
 
     public Long getId() {
@@ -87,5 +123,14 @@ public class Product {
 
     public BigDecimal getBalance() {
         return balance;
+    }
+
+    public BigDecimal getHeldAmount() {
+        return heldAmount;
+    }
+
+    /** The part of the balance that is not on hold: what a new withdrawal notice can draw on. */
+    public BigDecimal getAvailableBalance() {
+        return balance.subtract(heldAmount);
     }
 }

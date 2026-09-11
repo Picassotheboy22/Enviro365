@@ -6,7 +6,7 @@ import { formatRand } from '@/utils/format'
 
 // shadcn/ui charts: the config gives each data series a label and a colour (exposed as the CSS var --color-amount).
 const chartConfig = {
-  amount: { label: 'Withdrawn', color: 'var(--primary)' },
+  amount: { label: 'Paid out', color: 'var(--primary)' },
 } satisfies ChartConfig
 
 interface ChartRow {
@@ -15,7 +15,7 @@ interface ChartRow {
   notices: number
 }
 
-/** Amount withdrawn per calendar month (bar chart), with the number of notices in the tooltip. */
+/** Amount paid out per calendar month (bar chart), with the number of paid notices in the tooltip. */
 export function WithdrawalsChart({ months }: { months: MonthlyWithdrawals[] }) {
   const data: ChartRow[] = months.map((month) => ({
     month: month.month,

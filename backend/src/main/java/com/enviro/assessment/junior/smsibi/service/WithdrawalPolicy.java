@@ -21,6 +21,12 @@ import org.springframework.stereotype.Component;
  *   <li>a rule change happens in exactly one place.</li>
  * </ul>
  * The class is stateless, so it is safe to share as a Spring singleton.
+ *
+ * <p>The amount rules use the product's <em>available</em> balance: the balance minus money already on hold for open
+ * (pending or approved) notices. That gives the same answer as if every open notice had already been paid. With a
+ * balance of R 100,000 and R 90,000 on hold, R 10,000 is available and at most R 9,000 can be requested, which is
+ * exactly what the 90% rule allows once the first notice is paid. Without this, several open notices could together
+ * promise more money than the product holds.
  */
 @Component
 public class WithdrawalPolicy {
@@ -59,14 +65,14 @@ public class WithdrawalPolicy {
     }
 
     /**
-     * The most that can be withdrawn from this product right now: 0 if it is restricted, otherwise 90% of the
-     * balance, rounded DOWN to the cent so rounding can never let a withdrawal exceed the limit.
+     * The most that can be requested from this product right now: 0 if it is restricted, otherwise 90% of the
+     * available balance, rounded DOWN to the cent so rounding can never let a withdrawal exceed the limit.
      */
     public BigDecimal maxWithdrawalAmount(Product product, LocalDate today) {
         if (restrictionFor(product, today).isPresent()) {
             return ZERO_AMOUNT;
         }
-        return ninetyPercentOf(product.getBalance());
+        return ninetyPercentOf(product.getAvailableBalance());
     }
 
     /**
@@ -89,25 +95,33 @@ public class WithdrawalPolicy {
             throw new BusinessRuleException(RuleViolation.RETIREMENT_AGE_RESTRICTION, restriction.get());
         }
 
-        BigDecimal balance = product.getBalance();
-        if (amount.compareTo(balance) > 0) {
+        BigDecimal available = product.getAvailableBalance();
+        if (amount.compareTo(available) > 0) {
             throw new BusinessRuleException(
                     RuleViolation.INSUFFICIENT_BALANCE,
-                    "Withdrawal amount of " + rand(amount) + " exceeds the available balance of " + rand(balance)
-                            + ".");
+                    "Withdrawal amount of " + rand(amount) + " exceeds the available balance of " + rand(available)
+                            + onHoldNote(product) + ".");
         }
 
-        BigDecimal limit = ninetyPercentOf(balance);
+        BigDecimal limit = ninetyPercentOf(available);
         if (amount.compareTo(limit) > 0) {
             throw new BusinessRuleException(
                     RuleViolation.EXCEEDS_WITHDRAWAL_LIMIT,
-                    "Withdrawals may not exceed 90% of the balance. The maximum you can withdraw is " + rand(limit)
-                            + ".");
+                    "Withdrawals may not exceed 90% of the available balance. The maximum you can withdraw is "
+                            + rand(limit) + ".");
         }
     }
 
     private static BigDecimal ninetyPercentOf(BigDecimal balance) {
         return balance.multiply(MAX_WITHDRAWAL_RATIO).setScale(2, RoundingMode.DOWN);
+    }
+
+    // Explains why the available balance is lower than the balance, e.g. " (R 2,000.00 is on hold for open ...)".
+    private static String onHoldNote(Product product) {
+        if (product.getHeldAmount().signum() == 0) {
+            return "";
+        }
+        return " (" + rand(product.getHeldAmount()) + " is on hold for open withdrawal notices)";
     }
 
     /** Formats an amount for user-facing messages, e.g. "R 1,250.00". Locale.ROOT keeps it the same on every server. */

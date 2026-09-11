@@ -32,6 +32,7 @@ public final class AccessGuard {
                 || (filter.investorId() != null && !filter.investorId().equals(user.getInvestorId()))) {
             throw new AccessForbiddenException("You can only access your own withdrawals.");
         }
-        return new WithdrawalFilter(user.getInvestorId(), filter.productId(), filter.from(), filter.to());
+        return new WithdrawalFilter(
+                user.getInvestorId(), filter.productId(), filter.from(), filter.to(), filter.status());
     }
 }

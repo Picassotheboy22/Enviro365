@@ -17,8 +17,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalFilter;
 import com.enviro.assessment.junior.smsibi.dto.WithdrawalResponse;
+import com.enviro.assessment.junior.smsibi.entity.NoticeStatus;
 import com.enviro.assessment.junior.smsibi.entity.ProductType;
 import com.enviro.assessment.junior.smsibi.exception.BusinessRuleException;
+import com.enviro.assessment.junior.smsibi.exception.InvalidStatusTransitionException;
 import com.enviro.assessment.junior.smsibi.exception.ResourceNotFoundException;
 import com.enviro.assessment.junior.smsibi.exception.RuleViolation;
 import com.enviro.assessment.junior.smsibi.security.AuthenticatedUser;
@@ -50,6 +52,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class WithdrawalControllerTest {
 
     private static final AuthenticatedUser INVESTOR = TestUsers.investor(7L);
+    private static final AuthenticatedUser STAFF = TestUsers.admin();
 
     @Autowired
     private MockMvc mockMvc;
@@ -66,7 +69,7 @@ class WithdrawalControllerTest {
 
     @Test
     void createReturns201WithLocationHeaderAndBody() throws Exception {
-        when(withdrawalService.createWithdrawal(any(), eq(INVESTOR))).thenReturn(sampleWithdrawal());
+        when(withdrawalService.createWithdrawal(any(), eq(INVESTOR))).thenReturn(sample(NoticeStatus.PENDING));
 
         mockMvc.perform(post("/api/withdrawals")
                         .with(user(INVESTOR))
@@ -78,7 +81,7 @@ class WithdrawalControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", endsWith("/api/withdrawals/42")))
                 .andExpect(jsonPath("$.id").value(42))
-                .andExpect(jsonPath("$.balanceAfter").value(7500.00));
+                .andExpect(jsonPath("$.status").value("PENDING"));
     }
 
     @Test
@@ -159,19 +162,25 @@ class WithdrawalControllerTest {
 
     @Test
     void historyBindsQueryParametersToTheFilterAndPassesTheSignedInUser() throws Exception {
-        when(withdrawalService.findWithdrawals(any(), any())).thenReturn(List.of(sampleWithdrawal()));
+        when(withdrawalService.findWithdrawals(any(), any())).thenReturn(List.of(sample(NoticeStatus.PENDING)));
 
         mockMvc.perform(get("/api/withdrawals")
                         .with(user(INVESTOR))
                         .param("investorId", "7")
                         .param("from", "2026-01-01")
-                        .param("to", "2026-01-31"))
+                        .param("to", "2026-01-31")
+                        .param("status", "PENDING", "APPROVED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].productName").value("Unit Trust Portfolio"));
 
         verify(withdrawalService)
                 .findWithdrawals(
-                        eq(new WithdrawalFilter(7L, null, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31))),
+                        eq(new WithdrawalFilter(
+                                7L,
+                                null,
+                                LocalDate.of(2026, 1, 1),
+                                LocalDate.of(2026, 1, 31),
+                                List.of(NoticeStatus.PENDING, NoticeStatus.APPROVED))),
                         eq(INVESTOR));
     }
 
@@ -188,15 +197,19 @@ class WithdrawalControllerTest {
     }
 
     @Test
-    void unparseableDateReturns400() throws Exception {
-        mockMvc.perform(get("/api/withdrawals").with(user(INVESTOR)).param("from", "not-a-date"))
+    void unparseableFiltersReturn400() throws Exception {
+        mockMvc.perform(get("/api/withdrawals")
+                        .with(user(INVESTOR))
+                        .param("from", "not-a-date")
+                        .param("status", "NOT_A_STATUS"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors.from").value("Invalid value"));
+                .andExpect(jsonPath("$.errors.from").value("Invalid value"))
+                .andExpect(jsonPath("$.errors.status").value("Invalid value"));
     }
 
     @Test
     void exportReturnsCsvAsAttachment() throws Exception {
-        when(withdrawalService.findWithdrawals(any(), any())).thenReturn(List.of(sampleWithdrawal()));
+        when(withdrawalService.findWithdrawals(any(), any())).thenReturn(List.of(sample(NoticeStatus.PAID)));
         when(csvExportService.export(any()))
                 .thenReturn(new CsvExportService.CsvFile(
                         "withdrawal-statement-2026-09-10.csv", "Notice ID\r\n42\r\n".getBytes(StandardCharsets.UTF_8)));
@@ -207,6 +220,72 @@ class WithdrawalControllerTest {
                 .andExpect(header().string(
                                 "Content-Disposition", "attachment; filename=\"withdrawal-statement-2026-09-10.csv\""))
                 .andExpect(content().string("Notice ID\r\n42\r\n"));
+    }
+
+    // ---- the workflow ----
+
+    @Test
+    void staffCanApproveANotice() throws Exception {
+        when(withdrawalService.approve(42L, STAFF)).thenReturn(sample(NoticeStatus.APPROVED));
+
+        mockMvc.perform(post("/api/withdrawals/42/approve").with(user(STAFF)).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"));
+    }
+
+    @Test
+    void rejectPassesTheReasonToTheService() throws Exception {
+        when(withdrawalService.reject(42L, "Bank details are missing.", STAFF))
+                .thenReturn(sample(NoticeStatus.REJECTED));
+
+        mockMvc.perform(post("/api/withdrawals/42/reject")
+                        .with(user(STAFF))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason": "Bank details are missing."}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+    }
+
+    @Test
+    void rejectingWithoutAReasonReturns400() throws Exception {
+        mockMvc.perform(post("/api/withdrawals/42/reject")
+                        .with(user(STAFF))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"reason": "   "}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.reason").value("A reason is required"));
+
+        verifyNoInteractions(withdrawalService);
+    }
+
+    @Test
+    void investorsCanCancelTheirNotices() throws Exception {
+        when(withdrawalService.cancel(42L, INVESTOR)).thenReturn(sample(NoticeStatus.CANCELLED));
+
+        mockMvc.perform(post("/api/withdrawals/42/cancel").with(user(INVESTOR)).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void anInvalidStatusChangeReturns409WithTheCurrentStatus() throws Exception {
+        when(withdrawalService.pay(42L, STAFF))
+                .thenThrow(new InvalidStatusTransitionException(42L, NoticeStatus.PENDING, NoticeStatus.PAID));
+
+        mockMvc.perform(post("/api/withdrawals/42/pay").with(user(STAFF)).with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Notice status conflict"))
+                .andExpect(jsonPath("$.code").value("INVALID_STATUS_TRANSITION"))
+                .andExpect(jsonPath("$.currentStatus").value("PENDING"))
+                .andExpect(jsonPath("$.detail")
+                        .value("Withdrawal notice #42 is pending, so it cannot be paid. Only approved notices can be"
+                                + " paid."));
     }
 
     // ---- security rules ----
@@ -238,7 +317,7 @@ class WithdrawalControllerTest {
     @Test
     void staffAccountsCannotSubmitWithdrawals() throws Exception {
         mockMvc.perform(post("/api/withdrawals")
-                        .with(user(TestUsers.admin()))
+                        .with(user(STAFF))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -250,7 +329,29 @@ class WithdrawalControllerTest {
         verifyNoInteractions(withdrawalService);
     }
 
-    private static WithdrawalResponse sampleWithdrawal() {
+    @Test
+    void investorsCannotApproveRejectOrPayNotices() throws Exception {
+        for (String action : List.of("approve", "reject", "pay")) {
+            mockMvc.perform(post("/api/withdrawals/42/" + action)
+                            .with(user(INVESTOR))
+                            .with(csrf()))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.title").value("Access denied"));
+        }
+
+        verifyNoInteractions(withdrawalService);
+    }
+
+    @Test
+    void staffCannotCancelNotices() throws Exception {
+        mockMvc.perform(post("/api/withdrawals/42/cancel").with(user(STAFF)).with(csrf()))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(withdrawalService);
+    }
+
+    private static WithdrawalResponse sample(NoticeStatus status) {
+        boolean paid = status == NoticeStatus.PAID;
         return new WithdrawalResponse(
                 42L,
                 7L,
@@ -259,8 +360,15 @@ class WithdrawalControllerTest {
                 "Unit Trust Portfolio",
                 ProductType.SAVINGS,
                 new BigDecimal("2500.00"),
-                new BigDecimal("10000.00"),
-                new BigDecimal("7500.00"),
-                LocalDateTime.of(2026, 9, 10, 10, 0));
+                status,
+                paid ? new BigDecimal("10000.00") : null,
+                paid ? new BigDecimal("7500.00") : null,
+                LocalDateTime.of(2026, 9, 10, 10, 0),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 }

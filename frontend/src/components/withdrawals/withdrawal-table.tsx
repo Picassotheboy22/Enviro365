@@ -1,5 +1,4 @@
 import { Link } from 'react-router'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -10,9 +9,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { NoticeActions } from '@/components/withdrawals/notice-actions'
+import { NoticeStatusBadge } from '@/components/withdrawals/notice-status-badge'
 import type { WithdrawalResponse } from '@/types'
 import { formatDateTime, formatRand, productTypeLabel } from '@/utils/format'
-import { toCents } from '@/utils/validation'
+import { isOpen, paidTotal, statusHistory } from '@/utils/notices'
 
 interface WithdrawalTableProps {
   rows: WithdrawalResponse[] | undefined
@@ -21,6 +22,8 @@ interface WithdrawalTableProps {
   showTotals?: boolean
   /** Staff views: add a Client column that links to the client's portfolio. */
   showClient?: boolean
+  /** Add the workflow buttons (approve, reject, pay or cancel, depending on the signed-in user's role). */
+  showActions?: boolean
 }
 
 export function WithdrawalTable({
@@ -29,9 +32,10 @@ export function WithdrawalTable({
   emptyMessage,
   showTotals = true,
   showClient = false,
+  showActions = false,
 }: WithdrawalTableProps) {
-  const columns = showClient ? 8 : 7
-  const totalCents = (rows ?? []).reduce((sum, row) => sum + toCents(row.amount), 0)
+  const columns = 7 + (showClient ? 1 : 0) + (showActions ? 1 : 0)
+  const paid = paidTotal(rows ?? [])
 
   let body
   if (loading && !rows) {
@@ -53,18 +57,38 @@ export function WithdrawalTable({
             </Link>
           </TableCell>
         )}
-        <TableCell className="font-medium">{row.productName}</TableCell>
         <TableCell>
-          <Badge variant={row.productType === 'RETIREMENT' ? 'secondary' : 'outline'}>
-            {productTypeLabel[row.productType]}
-          </Badge>
+          <div className="font-medium">{row.productName}</div>
+          <div className="text-xs text-muted-foreground">{productTypeLabel[row.productType]}</div>
         </TableCell>
         <TableCell className="text-right tabular-nums">{formatRand(row.amount)}</TableCell>
-        <TableCell className="text-right text-muted-foreground tabular-nums">
-          {formatRand(row.balanceBefore)}
+        <TableCell>
+          <NoticeStatusBadge status={row.status} title={statusHistory(row)} />
+          {row.rejectionReason && (
+            <p className="mt-1 max-w-64 text-xs whitespace-normal text-muted-foreground">
+              {row.rejectionReason}
+            </p>
+          )}
         </TableCell>
-        <TableCell className="text-right tabular-nums">{formatRand(row.balanceAfter)}</TableCell>
+        {row.balanceBefore === null || row.balanceAfter === null ? (
+          // The balance only changes when a notice is paid, so until then there are no balances to show.
+          <TableCell colSpan={2} className="text-center text-xs text-muted-foreground">
+            {isOpen(row.status) ? 'On hold until paid' : 'Nothing paid'}
+          </TableCell>
+        ) : (
+          <>
+            <TableCell className="text-right text-muted-foreground tabular-nums">
+              {formatRand(row.balanceBefore)}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">{formatRand(row.balanceAfter)}</TableCell>
+          </>
+        )}
         <TableCell className="text-right text-muted-foreground">#{row.id}</TableCell>
+        {showActions && (
+          <TableCell className="text-right">
+            <NoticeActions notice={row} />
+          </TableCell>
+        )}
       </TableRow>
     ))
   } else {
@@ -82,27 +106,32 @@ export function WithdrawalTable({
       <Table>
         <TableHeader className="bg-muted/50">
           <TableRow>
-            <TableHead>Date</TableHead>
+            <TableHead>Submitted</TableHead>
             {showClient && <TableHead>Client</TableHead>}
             <TableHead>Product</TableHead>
-            <TableHead>Type</TableHead>
             <TableHead className="text-right">Amount</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead className="text-right">Balance before</TableHead>
             <TableHead className="text-right">Balance after</TableHead>
             <TableHead className="text-right">Ref</TableHead>
+            {showActions && (
+              <TableHead className="text-right">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>{body}</TableBody>
         {showTotals && rows && rows.length > 0 && (
           <TableFooter>
             <TableRow>
-              <TableCell colSpan={showClient ? 4 : 3} className="font-medium">
-                Total ({rows.length} {rows.length === 1 ? 'withdrawal' : 'withdrawals'})
+              <TableCell colSpan={showClient ? 3 : 2} className="font-medium">
+                Paid out ({paid.count} of {rows.length} {rows.length === 1 ? 'notice' : 'notices'})
               </TableCell>
               <TableCell className="text-right font-semibold tabular-nums">
-                {formatRand(totalCents / 100)}
+                {formatRand(paid.amount)}
               </TableCell>
-              <TableCell colSpan={3} />
+              <TableCell colSpan={columns - (showClient ? 4 : 3)} />
             </TableRow>
           </TableFooter>
         )}

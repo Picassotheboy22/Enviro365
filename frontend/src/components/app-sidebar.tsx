@@ -22,8 +22,8 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 
-// Staff work across clients; investors work with their own portfolio. Staff accounts are read-only, so they don't get
-// the withdrawal form.
+// Staff work across clients; investors work with their own portfolio. Staff review and pay notices rather than submit
+// them, so they don't get the withdrawal form.
 const STAFF_ITEMS: NavItem[] = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboardIcon },
   { title: 'Clients', url: '/clients', icon: UsersIcon, activePrefix: '/clients/' },

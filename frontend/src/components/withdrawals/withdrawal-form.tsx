@@ -36,8 +36,11 @@ export function WithdrawalForm({ products, onSuccess }: WithdrawalFormProps) {
   const clientErrors = validateWithdrawal(product, amount)
   const productError = serverErrors.productId ?? (touched.productId ? clientErrors.productId : undefined)
   const amountError = serverErrors.amount ?? (touched.amount ? clientErrors.amount : undefined)
-  const balanceAfter =
-    product && !hasErrors(clientErrors) ? (toCents(product.balance) - toCents(Number(amount))) / 100 : null
+  // What is left for new notices once this one holds its amount. The balance itself only changes on payment.
+  const availableAfter =
+    product && !hasErrors(clientErrors)
+      ? (toCents(product.availableBalance) - toCents(Number(amount))) / 100
+      : null
 
   function clearServerFeedback() {
     setServerErrors({})
@@ -90,8 +93,8 @@ export function WithdrawalForm({ products, onSuccess }: WithdrawalFormProps) {
             <SelectContent>
               {products.map((p) => (
                 <SelectItem key={p.id} value={String(p.id)}>
-                  {p.name} · {formatRand(p.balance)}
-                  {p.withdrawalAllowed ? '' : ' (not eligible)'}
+                  {p.name} ·{' '}
+                  {p.withdrawalAllowed ? `${formatRand(p.availableBalance)} available` : 'not eligible'}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -136,29 +139,39 @@ export function WithdrawalForm({ products, onSuccess }: WithdrawalFormProps) {
           ) : (
             product?.withdrawalAllowed && (
               <FieldDescription>
-                You can withdraw up to {formatRand(product.maxWithdrawalAmount)} (90% of{' '}
-                {formatRand(product.balance)}
-                ).
+                You can withdraw up to {formatRand(product.maxWithdrawalAmount)} (90% of the available{' '}
+                {formatRand(product.availableBalance)}).
               </FieldDescription>
             )
           )}
         </Field>
 
-        {product && balanceAfter !== null && (
-          <dl className="grid gap-1 rounded-lg border border-dashed bg-muted/40 p-4 text-sm tabular-nums">
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Current balance</dt>
-              <dd>{formatRand(product.balance)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Withdrawal</dt>
-              <dd>− {formatRand(Number(amount))}</dd>
-            </div>
-            <div className="mt-1 flex justify-between border-t pt-2 font-semibold">
-              <dt>Balance after</dt>
-              <dd>{formatRand(balanceAfter)}</dd>
-            </div>
-          </dl>
+        {product && availableAfter !== null && (
+          <div className="grid gap-2 rounded-lg border border-dashed bg-muted/40 p-4 text-sm">
+            <dl className="grid gap-1 tabular-nums">
+              <div className="flex justify-between">
+                <dt className="text-muted-foreground">Balance</dt>
+                <dd>{formatRand(product.balance)}</dd>
+              </div>
+              {product.heldAmount > 0 && (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">On hold for open notices</dt>
+                  <dd>− {formatRand(product.heldAmount)}</dd>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <dt className="text-muted-foreground">This notice</dt>
+                <dd>− {formatRand(Number(amount))}</dd>
+              </div>
+              <div className="mt-1 flex justify-between border-t pt-2 font-semibold">
+                <dt>Available after this notice</dt>
+                <dd>{formatRand(availableAfter)}</dd>
+              </div>
+            </dl>
+            <p className="text-xs text-muted-foreground">
+              The amount is put on hold now. Your balance changes when Enviro365 pays the notice.
+            </p>
+          </div>
         )}
 
         <Button type="submit" disabled={mutation.isPending} className="w-full sm:w-auto sm:self-start">
