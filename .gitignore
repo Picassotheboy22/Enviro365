@@ -1,0 +1,8 @@
+# Backend and frontend have their own .gitignore files (target/, node_modules/, dist/ ...).
+# This one covers editor and OS files anywhere in the repo.
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
